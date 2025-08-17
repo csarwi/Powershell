@@ -86,4 +86,20 @@ function Remove-SystemPath {
     Write-Host "Removed '$Path' from $target PATH."
 }
 
-Export-ModuleMember -Function Set-EnvVar, Remove-EnvVar, Add-SystemPath, Remove-SystemPath
+function New-CodeItem {
+    [CmdletBinding(PositionalBinding = $true)]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$Path
+    )
+
+    # Create the file (no error if it already exists)
+    New-Item -ItemType File -Path $Path
+
+    # Open current folder as workspace and the file in the same window
+    & code -r . $Path
+}# Define the alias in module scope
+Set-Alias -Name nci -Value New-CodeItem
+
+# Explicitly export members so they appear in the importing session
+Export-ModuleMember -Function Set-EnvVar,Remove-EnvVar,Add-SystemPath,Remove-SystemPath,New-CodeItem -Alias nci
