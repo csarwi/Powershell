@@ -5,8 +5,8 @@
     CompanyName       = 'Creativ Software AG'
     Description       = 'Handy functions for my daily workflow'
     PowerShellVersion = '5.1'
-    FunctionsToExport = @('Set-EnvVar','Remove-EnvVar','Add-SystemPath','Remove-SystemPath', 'New-CodeItem')
-    AliasesToExport   = @('nci')
+    FunctionsToExport = @('Set-EnvVar','Remove-EnvVar','Add-SystemPath','Remove-SystemPath', 'New-CodeItem', "Get-GlobalGitStatus")
+    AliasesToExport   = @('nci', 'gggs')
     CompatiblePSEditions = @('Desktop') 
     PrivateData = @{
         PSData = @{

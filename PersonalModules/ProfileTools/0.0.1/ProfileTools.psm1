@@ -101,5 +101,168 @@ function New-CodeItem {
 }# Define the alias in module scope
 Set-Alias -Name nci -Value New-CodeItem
 
+ function Get-GlobalGitStatus {
+	[CmdletBinding()]
+	param(
+		[string]$Path = "C:\"
+	)
+
+	# --- Fast helpers ---
+	function Test-GitAvailable {
+		$null -ne (Get-Command git -ErrorAction SilentlyContinue)
+	}
+
+	function Get-EffectiveSearchRoots {
+		param([string]$InputPath)
+
+		# Normalize for C:\ detection without touching other C:\ children
+		$norm = $InputPath.TrimEnd('\')
+		if ($norm -ieq 'C:') {
+			$norm = 'C:\' 
+		}
+
+		if ($norm -ieq 'C:\') {
+			# Hard allow-list: ONLY these two. We do not enumerate any other C:\ children.
+			$roots = @()
+			foreach ($p in @('C:\src', 'C:\Users')) {
+				if (Test-Path -LiteralPath $p) {
+					$roots += $p 
+				}
+			}
+			return $roots
+		}
+
+		if (-not (Test-Path -LiteralPath $InputPath)) {
+			throw "Path not found: $InputPath"
+		}
+		return @($InputPath)
+	}
+
+	function Get-GitRepoPaths {
+		<#
+      Iterative traversal using .NET enumerators (streaming, low overhead).
+      Prunes immediately when a .git folder is present in the current directory.
+    #>
+		param([string[]]$Roots)
+
+		$results = New-Object System.Collections.Generic.List[string]
+		$stack = New-Object System.Collections.Generic.Stack[System.IO.DirectoryInfo]
+
+		foreach ($r in $Roots) {
+			try {
+				$d = New-Object System.IO.DirectoryInfo($r)
+				if ($d.Exists) {
+					$stack.Push($d) 
+				}
+			}
+			catch { 
+			}
+		}
+
+		while ($stack.Count -gt 0) {
+			$cur = $stack.Pop()
+
+			try {
+				# Fast repo check: does current folder contain a ".git" dir?
+				$gitPath = Join-Path $cur.FullName '.git'
+				if (Test-Path -LiteralPath $gitPath) {
+					$results.Add($cur.FullName) | Out-Null
+					continue  # prune subtree
+				}
+
+				# Enumerate child dirs (streamed). Skip reparse points to avoid cycles.
+				foreach ($child in $cur.EnumerateDirectories('*', [System.IO.SearchOption]::TopDirectoryOnly)) {
+					try {
+						if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+							continue 
+						}
+						$stack.Push($child)
+					}
+					catch {
+						continue 
+					}
+				}
+			}
+			catch {
+				continue
+			}
+		}
+
+		return $results
+	}
+
+	function Get-GitStatus {
+		param([string]$RepoPath)
+		Push-Location $RepoPath
+		try {
+			git status 2>&1
+		}
+		finally {
+			Pop-Location
+		}
+	}
+
+	function Test-GitStatusIsClean {
+		param([string]$Text)
+		if (-not $Text) {
+			return $false 
+		}
+		($Text -match 'nothing to commit') -and ($Text -match 'working\s+(tree|directory)\s+clean')
+	}
+
+	function Test-GitStatusIsFatalOrNotRepo {
+		param([string]$Text)
+		if (-not $Text) {
+			return $false 
+		}
+		($Text -match 'fatal:') -or ($Text -match 'not a git repository')
+	}
+
+	# --- Main ---
+	if (-not (Test-GitAvailable)) {
+		Write-Error "git not found in PATH."
+		exit 1
+	}
+
+	try {
+		$roots = Get-EffectiveSearchRoots -InputPath $Path
+	}
+ catch {
+		Write-Error $_.Exception.Message
+		exit 1
+	}
+
+	if (-not $roots -or $roots.Count -eq 0) {
+		Write-Host "No valid roots to scan."
+		exit 0
+	}
+
+	Write-Host "Executing git status Recursivly over $Path ..."
+	$repos = Get-GitRepoPaths -Roots $roots
+
+	foreach ($repo in $repos) {
+		$status = $null
+		try {
+			$status = Get-GitStatus -RepoPath $repo 
+		}
+		catch {
+			$status = $_.Exception.Message 
+		}
+
+		if (Test-GitStatusIsFatalOrNotRepo $status) {
+			continue 
+		}
+		if (Test-GitStatusIsClean $status) {
+			continue 
+		}
+
+		$sep = ('#' * 10)
+		Write-Host "$sep`n$repo$sep"
+		Write-Host $status
+	}
+} 
+
+Set-Alias -Name gggs -Value Get-GlobalGitStatus
+
 # Explicitly export members so they appear in the importing session
-Export-ModuleMember -Function Set-EnvVar,Remove-EnvVar,Add-SystemPath,Remove-SystemPath,New-CodeItem -Alias nci
+Export-ModuleMember -Function Set-EnvVar,Remove-EnvVar,Add-SystemPath,Remove-SystemPath,New-CodeItem,Get-GlobalGitStatus -Alias nci,gggs
